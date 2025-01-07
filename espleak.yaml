@@ -1,0 +1,552 @@
+# Copyright (C) 2025 David Schneider
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+substitutions:
+  # Critical configuration
+  i2c_a_scl: GPIO16  # sensor A I2C clock
+  i2c_a_sda: GPIO13  # sensor A I2C data
+  i2c_b_scl: GPIO14  # sensor B I2C clock
+  i2c_b_sda: GPIO15  # sensor B I2C data
+  leak_out:  GPIO5   # leak detected output, active-high output
+  qmc_off:   GPIO4   # sensor power-down signal, active-high output
+  led:       GPIO2   # status LED, active-high output
+  button:    GPIO34  # on-device clear/reset button, active-low input
+  volume_per_quarter_rotation: '0.25/198.334'  # From https://www.instrumart.com/assets/badger-er10_manual.pdf
+  sensor_update_interval_ms: '5'  # 5 (200Hz), unless I2C can't keep up. Increasing reduces maximum flow rate
+  i2c_bus_frequency: '150khz'  # Recommended at least 100khz to maintain 200Hz sampling consistently
+  reverse_flow: 'false'  # Flip this if your sensor order results in negative flow in normal conditions
+  flow_interval_s: '1'  # Increasing this allows for reporting tinier flows, but averages out short spikes
+
+  # Cosmetic configuration
+  flow_report_interval_s: '10'  # Increasing this beyond ${flow_interval_s} averages the data sent to HomeAssistant
+  volume_unit: 'gal'  # Volume units
+
+  # Functional/informative; DO NOT EDIT
+  flow_epsilon: '${volume_per_quarter_rotation}*60/${flow_interval_s}'  # The minimum reportable flow rate
+  flow_max: '${volume_per_quarter_rotation}*120000/${sensor_update_interval_ms}'  # The maximum reportable flow rate
+
+  # flowmon: performs leak detection by monitoring flow rate over time
+  # multiple monitors allow for faster response to higher flow rates
+  # negative flow monitors react to an upstream leak, or aliasing from a high-flow pipe burst
+  # Leaks are tracked by a flow threshold and a allowed duration:
+  #   flowmon_thresh: maximum allowed flow in volume_units; beyond this, the timer will count down.
+  #                   can be negative. zero means any non-zero flow, positive *or* negative.
+  #   flowmon_dur_s: the number of seconds to allow a flow before triggering a leak. set to 0 to trigger instantly.
+  # a leak warning will be issued in one of the following conditions:
+  #   if the duration is at least flowmon_warn_s: less than flowmon_warn_s or flowmon_warn_s_factor of the time left
+  #   if the duration is less than flowmon_warn_s: within flowmon_warn_thresh_factor of the flow threshold
+  # To avoid false-positives, negative flows are ignored if the sample rate is below sample_rate_safety_factor of normal
+  # To avoid false-negatives, monitors are only reset if the sample rate is above sample_rate_safety_factor of normal
+  # The minimum flow rate detectable is ${flow_epsilon}, but natural variations of municipal water pressure as well as
+  #   the expansion effect of tank water heaters will cause a small amount of flow in either direction.
+  # Example flowmon strategy for a 2ba:
+  #   Gather data:
+  #   * time how long it takes a toilet to refill
+  #   * turn on both showers and get the peak water usage with just the showers
+  #   set the following monitors:
+  #   0) 1.5x both showers for more than 5 seconds
+  #   1) usage beyond both showers for more than a toilet refill period
+  #   2) a single shower for more than an hour
+  #   3) any flow for more than 3 hours
+  #   4) a significant negative water flow for any amount of time
+  # As a safety check, if the length of flowmon_thresh and flowmon_dur_s aren't the same,
+  #   you will get a compile-time error: "size of array 't' is negative"
+  flowmon_thresh: '7.5,   5,    2,     0, -4*${flow_epsilon}'
+  flowmon_dur_s:  '  5, 180, 3600, 10800,                  0'
+  flowmon_warn_s: '60'
+  flowmon_warn_s_factor: '0.05'
+  flowmon_warn_thresh_factor: '0.9'
+  sample_rate_safety_factor: '0.95'
+
+  # burstmon: performs pipe burst detection by monitoring sensors for abnormal behavior
+  # Burst pipes pose an issue for detection, as the flow rates quickly get unreasonably large for our sample rates
+  # Once the flow gets large enough, aliasing occurs and it may look like a smaller (or negative!) flow rate.
+  # To defend against this, imagine that the steady-state of a burst pipe can alias and look like any flow,
+  #   from -flow_max to +flow_max, uniformly-distributed.
+  # An aggressive negative flowmon will catch 50% of these flows.
+  # If a flowmon for the maximum expected flow is set at a quarter of the flow_max, that will catch 37.5% of the flows.
+  # The remaining ~12.5% of the flows pose a challenge if they reach steady-state, since they look like normal flows.
+  # Fortunately, pipe burst events do not instantly reach steady-state, so burstmon monitors for abnormal sensor
+  # behavior that would indicate a very high flow rate.  Burstmon reacts on the timeframe of the sampling rate, rather
+  # than the flow interval, so it can catch these sudden transients well before the burst hits steady-state.
+  # As a side note: if the sensors are noisy and hysteresis gets too large, some exceptional flows hovering around a
+  # multiple of flow_max will be hard to detect.  The dead zone can be calculated by 2*hysteresis/(max-min), so
+  # approximately a tenth of flows that themselves are at some multiple of flow_max -- very small odds.
+  # burstmon is only activated when the sample rate is above sample_rate_safety_factor of the target sample rate.
+  burstmon_any_thresh: '3'  # maximum allowed sensor inversions in a row (0 disables)
+                            # setting to 1 may also trigger at flows beyond flow_max/4
+                            # setting at or beyond 2*burstmon_same_thresh effectively disables it
+  burstmon_same_thresh: '2' # maximum allowed same-sensor inversions in a row (0 disables)
+                            # setting to 1 may also trigger at flows beyond flow_max/2
+
+
+esphome:
+  on_boot:
+    then:
+      - lambda: App.set_loop_interval(0);
+      - button.press: leak_clear
+
+
+# Quiet qmc5883l logging to speed it up
+logger:
+  logs:
+    qmc5883l: WARN
+
+
+# Pull in external versions of i2c and qmc5883l with added resiliency features
+external_components:
+  - source: github://dnschneid/esphome@i2creset
+    components: [ i2c, qmc5883l ]
+    refresh: 60s
+
+
+globals:
+  - id: errors
+    type: long
+    restore_value: no
+    initial_value: '0'
+  - id: samples
+    type: int[2]
+    restore_value: no
+    initial_value: '{0,0}'
+  - id: quarter_rotations_total
+    type: long
+    restore_value: yes
+    initial_value: '0'
+  - id: quarter_rotations_flow
+    type: long
+    restore_value: no
+    initial_value: '0'
+  - id: qcal
+    type: float[5]
+    restore_value: yes
+    initial_value: '{0,0,0,0,0}'
+  - id: led_level
+    type: float
+    restore_value: no
+    initial_value: '1'
+
+
+number:
+  - platform: template
+    id: simulate_flow
+    name: Simulate flow
+    disabled_by_default: true
+    entity_category: diagnostic
+    min_value: -400
+    max_value: 400
+    step: 1
+    initial_value: 0
+    optimistic: true
+
+
+binary_sensor:
+  - platform: gpio
+    name: Button
+    entity_category: diagnostic
+    disabled_by_default: true
+    pin:
+      number: ${button}
+      inverted: true
+    # Debounce
+    filters:
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - button.press: qmc_restart
+        - button.press: leak_clear
+
+  - platform: template
+    id: leak_detected
+    name: Leak detected
+    device_class: problem
+    on_press:
+      then:
+        - output.turn_on: leak_out
+    on_release:
+      then:
+        - output.turn_off: leak_out
+
+  - platform: template
+    id: leak_warning
+    name: Leak imminent
+    device_class: problem
+
+  - platform: template
+    id: sensor_failure
+    name: Sensor failure
+    device_class: problem
+    entity_category: diagnostic
+
+
+text_sensor:
+  - platform: template
+    id: leak_trigger
+    name: Leak trigger
+    entity_category: diagnostic
+
+
+output:
+  - platform: ledc
+    pin: ${led}
+    id: led
+    frequency: 1220hz
+  - platform: slow_pwm
+    id: led_blink
+    period: 2s
+    turn_on_action:
+      - lambda: id(led).set_level(id(led_level));
+    turn_off_action:
+      - output.turn_off: led
+
+  - platform: gpio
+    pin: ${qmc_off}
+    id: qmc_off
+
+  - platform: gpio
+    pin:
+      number: ${leak_out}
+      inverted: true
+    id: leak_out
+
+
+button:
+  - platform: template
+    name: Clear leak
+    id: leak_clear
+    on_press:
+      then:
+        - number.set:
+            id: simulate_flow
+            value: 0
+        - binary_sensor.template.publish:
+            id: leak_detected
+            state: off
+        - binary_sensor.template.publish:
+            id: leak_warning
+            state: off
+        - text_sensor.template.publish:
+            id: leak_trigger
+            state: "all clear"
+  - platform: template
+    name: Recalibrate sensors
+    id: recalibrate
+    entity_category: diagnostic
+    on_press:
+      then:
+        - lambda: |-
+            for (int i = 0; i < sizeof(id(qcal))/sizeof(id(qcal)[0]); i++) {
+              id(qcal)[i] = 0;
+            }
+            id(sensor_failure).publish_state(false);
+  - platform: template
+    name: Restart sensors
+    id: qmc_restart
+    entity_category: diagnostic
+    disabled_by_default: true
+    on_press:
+      then:
+        - lambda: |-
+            id(qmc_a).stop_poller();
+            id(qmc_b).stop_poller();
+            id(sensor_flow).stop_poller();
+            id(i2c_a).discharge();
+            id(i2c_b).discharge();
+        - output.turn_on: qmc_off
+        - delay: 25ms
+        - output.turn_off: qmc_off
+        - lambda: |-
+            id(i2c_a).setup();
+            id(i2c_b).setup();
+            id(qmc_a).call_setup();
+            id(qmc_b).call_setup();
+            id(qmc_a).start_poller();
+            id(qmc_b).start_poller();
+            id(sensor_flow).start_poller();
+
+i2c:
+  - id: i2c_a
+    scl: ${i2c_a_scl}
+    sda: ${i2c_a_sda}
+    frequency: ${i2c_bus_frequency}
+    scan: False
+
+  - id: i2c_b
+    scl: ${i2c_b_scl}
+    sda: ${i2c_b_sda}
+    frequency: ${i2c_bus_frequency}
+    scan: False
+
+sensor:
+  - platform: qmc5883l
+    id: qmc_a
+    i2c_id: i2c_a
+    address: 0x0D
+    update_interval: ${sensor_update_interval_ms}ms
+    oversampling: 64x
+    field_strength_z:
+      id: z_a
+      entity_category: diagnostic
+      on_raw_value:
+        then:
+          - lambda: id(sensor_update).execute(0, x);
+      filters:
+        - delta: 5
+        - throttle: 500ms
+
+  - platform: qmc5883l
+    id: qmc_b
+    i2c_id: i2c_b
+    address: 0x0D
+    update_interval: ${sensor_update_interval_ms}ms
+    oversampling: 64x
+    field_strength_z:
+      id: z_b
+      entity_category: diagnostic
+      on_raw_value:
+        then:
+          - lambda: id(sensor_update).execute(1, x);
+      filters:
+        - delta: 5
+        - throttle: 500ms
+
+  - platform: template
+    id: sensor_errors
+    name: Errors
+    entity_category: diagnostic
+    lambda: return id(errors);
+    accuracy_decimals: 0
+    filters:
+      - delta: 1
+
+  - platform: template
+    id: sensor_sample_rate
+    name: Sample rate
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    device_class: frequency
+    state_class: measurement
+    unit_of_measurement: hz
+    filters:
+      - or:
+        - throttle: 60s
+        - delta: 4
+
+  - platform: template
+    id: sensor_total
+    name: Total
+    lambda: return id(quarter_rotations_total) * ${volume_per_quarter_rotation};
+    update_interval: 1s
+    accuracy_decimals: 2
+    device_class: water
+    icon: mdi:water
+    state_class: total
+    unit_of_measurement: ${volume_unit}
+    filters:
+      - or:
+        - throttle: 60s
+        - delta: 0.01
+
+  - platform: template
+    id: sensor_flow
+    name: Flow
+    update_interval: ${flow_interval_s}s
+    accuracy_decimals: 2
+    device_class: volume_flow_rate
+    icon: mdi:water
+    state_class: measurement
+    unit_of_measurement: ${volume_unit}/min
+    filters:
+      - throttle_average: ${flow_report_interval_s}s
+    lambda: |-
+      static const float sample_rate_safety_factor = ${sample_rate_safety_factor};
+      static const float warn_thresh_factor = ${flowmon_warn_thresh_factor};
+      static const float warn_s_factor = ${flowmon_warn_s_factor};
+      static const float warn_s = ${flowmon_warn_s};
+      static const float thresh[] = {${flowmon_thresh}};
+      static const float dur_s[] = {${flowmon_dur_s}};
+      static const int count = sizeof(thresh)/sizeof(thresh[0]);
+      static float t[count==sizeof(dur_s)/sizeof(dur_s[0])?count:-1] = {0};
+      static int zero_flow_run = 0;
+      static int reset_state = 0;
+      static float max_sample_rate = 0;
+      static float max_flow = ${flow_epsilon};
+      float flow = (id(quarter_rotations_flow) + id(simulate_flow).state) * ${flow_epsilon};
+      id(quarter_rotations_flow) = 0;
+      // Update sample rate
+      float rate = min(id(samples)[0], id(samples)[1]) / ${flow_interval_s};
+      id(samples)[0] = 0;
+      id(samples)[1] = 0;
+      if (reset_state == 0) {
+        // Reset flowmon
+        for (int i = 0; i < count; i++) {
+          t[i] = dur_s[i];
+          max_flow = max(max_flow, thresh[i]);
+        }
+        reset_state = 1;
+        return NAN;
+      } else if (rate || reset_state > 5) {
+        reset_state = 1;
+      } else if (!rate && reset_state++ == 1) {
+        // Restart the sensors if sample rate is zero
+        id(errors) += 1;
+        id(qmc_restart).press();
+      }
+      max_sample_rate = max(max_sample_rate, rate);
+      id(sensor_sample_rate).publish_state(rate);
+      if (rate) {
+        // Flowmon!
+        std::string logstate;
+        for (int i = 0; i < count; i++) {
+          bool update_text = false;
+          if (thresh[i] >= 0 && flow > thresh[i] ||
+              thresh[i] <= 0 && flow < thresh[i]) {
+            // avoid the case where poor sample rates alias normal flows to look negative
+            if (thresh[i] >= 0 || rate >= max_sample_rate * sample_rate_safety_factor) {
+              t[i] -= ${flow_interval_s};
+            }
+            if (t[i] <= max(warn_s, dur_s[i] * warn_s_factor)) {
+              id(leak_warning).publish_state(true);
+              update_text = true;
+            }
+            if (t[i] <= 0.0f) {
+              id(leak_detected).publish_state(true);
+              update_text = true;
+            }
+          } else {
+            // warn based on flow threshold for short-trigger monitors
+            if (dur_s[i] < warn_s && (
+                 thresh[i] >= 0 && flow > thresh[i] * warn_thresh_factor ||
+                 thresh[i] <= 0 && flow < thresh[i] * warn_thresh_factor)) {
+              id(leak_warning).publish_state(true);
+              update_text = true;
+            }
+            // only reset the monitor if the sample rate is normal
+            if (rate >= max_sample_rate * sample_rate_safety_factor) {
+              t[i] = dur_s[i];
+            }
+          }
+          if (update_text) {
+            id(leak_trigger).publish_state(str_sprintf("flowmon #%i (%g for %gs)", i, thresh[i], dur_s[i]).c_str());
+          }
+          logstate += str_sprintf("%g ", t[i]);
+        }
+        ESP_LOGD("flowmon", "%g: %s", flow, logstate.c_str());
+
+        // Monitor for detached sensors
+        if (flow) {
+          zero_flow_run = 0;
+        } else if (zero_flow_run++ > 86400/${flow_interval_s}) {
+          zero_flow_run = 0;
+          id(sensor_failure).publish_state(true);
+          ESP_LOGW("sensors", "no flow for 24 hours; did the sensors fall off?");
+        }
+      }
+      // Diagnostic: update LED state
+      id(led_level) = id(leak_detected).state || !rate ? 1 : flow / max_flow;
+      id(led_blink).set_period(rate ? 2000 : 1000);
+      if (id(leak_detected).state || id(leak_warning).state || !rate) {
+        id(led_blink).set_level(0.5);
+      } else {
+        id(led_blink).set_level(1);
+        id(led).set_level(id(led_level));
+      }
+      // Return NAN for flow if there's no sampling
+      return rate ? flow : NAN;
+
+script:
+  - id: sensor_update
+    parameters:
+      sensor: int
+      value: float
+    then:
+      - lambda: |-
+          // based on https://cdn.sparkfun.com/datasheets/Robotics/How%20to%20use%20a%20quadrature%20encoder.pdf
+          static const int qdec[16] = {0,-1,1,2,1,0,2,-1,-1,2,0,1,2,1,-1,0};
+          static int q[2] = {0,0};
+          static int run[3] = {0,0,0};
+          static int hyst_sampling = 0;
+          static int last_sample[2] = {0, 0};
+          static const float sample_rate_thresh = 1000/${sensor_update_interval_ms}*${sample_rate_safety_factor};
+          float& smin = id(qcal)[2*sensor];
+          float& smax = id(qcal)[2*sensor+1];
+          float& hysteresis = id(qcal)[4];
+          id(samples)[sensor] += 1;
+          if (!smin && !smax) {
+            smin = smax = value;
+            hyst_sampling = 1000;
+          } else {
+            smin = min(smin, value);
+            smax = max(smax, value);
+          }
+          if (hyst_sampling) {
+            hyst_sampling--;
+            if (smax - smin > hysteresis) {
+              hysteresis = smax - smin;
+              hyst_sampling = 1000;
+              if (hysteresis > 20) {
+                hysteresis = 20;
+                hyst_sampling = 0;
+                id(sensor_failure).publish_state(true);
+                ESP_LOGW("sensors", "hysteresis overly high (>%g); is water flowing?", hysteresis);
+              }
+            } else if (!hyst_sampling) {
+              ESP_LOGD("sensors", "hysteresis set to %g", hysteresis);
+            }
+            return;
+          } else if (smax - smin < 2*hysteresis) {
+            return;
+          }
+          int tare = (smin + smax) / 2;
+          int mod = 0;
+          if (value > tare+hysteresis && !q[sensor]) {
+            q[sensor] = 1;
+            mod = qdec[q[1-sensor] * (5 << 1-sensor) + (1 << sensor)];
+          } else if (value < tare-hysteresis && q[sensor]) {
+            q[sensor] = 0;
+            mod = qdec[q[1-sensor] * (5 << 1-sensor) + (4 << sensor)];
+          }
+          if (mod == 2) {
+            id(errors) += 1;
+          } else if (mod) {
+            if (${reverse_flow}) {
+              mod = -mod;
+            }
+            id(quarter_rotations_total) += mod;
+            id(quarter_rotations_flow) += mod;
+          }
+          // burstmon
+          int sample_time = millis();
+          if (mod && sample_time - last_sample[sensor] < 2*${sensor_update_interval_ms}
+                  && id(sensor_sample_rate).state > sample_rate_thresh) {
+            run[sensor]++;
+            run[2]++;
+            bool any_burst = ${burstmon_any_thresh} && run[2] > ${burstmon_any_thresh};
+            bool same_burst = ${burstmon_same_thresh} && run[sensor] > ${burstmon_same_thresh};
+            if (any_burst || same_burst) {
+              id(leak_warning).publish_state(true);
+              id(leak_detected).publish_state(true);
+              if (any_burst && same_burst) {
+                id(leak_trigger).publish_state("burstmon: same + any");
+              } else if (any_burst) {
+                id(leak_trigger).publish_state("burstmon: any");
+              } else {
+                id(leak_trigger).publish_state("burstmon: same");
+              }
+            }
+          } else {
+            run[sensor] = 0;
+            run[2] = 0;
+          }
+          last_sample[sensor] = sample_time;
