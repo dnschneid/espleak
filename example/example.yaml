@@ -1,0 +1,81 @@
+# UEXT connector
+#              ________
+#             |        |
+#             |        |
+#       +3.3V | 1+  +2 | GND
+#    4  PWR_L ' 3+  +4 | (URX)  36
+#   16  SCL-A   5+  +6 | SDA-A  13
+#   15  SDA-B . 7+  +8 | LED     2
+#   14  SCL-B | 9+  +0 | LEAK_L  5
+#             |        |
+#             |________|
+#
+
+substitutions:
+  # Critical configuration
+  i2c_a_scl: GPIO16
+  i2c_a_sda: GPIO13
+  i2c_b_scl: GPIO14
+  i2c_b_sda: GPIO15
+  leak_out:  GPIO5
+  qmc_off:   GPIO4
+  led:       GPIO2
+  button:    GPIO34
+  volume_per_quarter_rotation: '0.25/198.334'
+  sensor_update_interval_ms: '5'
+  i2c_bus_frequency: '150khz'
+  reverse_flow: 'false'
+  flow_interval_s: '1'
+
+  # Cosmetic configuration
+  flow_report_interval_s: '10'
+  volume_unit: 'gal'
+
+  # Functional/informative; DO NOT EDIT
+  flow_epsilon: '${volume_per_quarter_rotation}*60/${flow_interval_s}'
+  flow_max: '${volume_per_quarter_rotation}*120000/${sensor_update_interval_ms}'
+
+  # Leak detection configuration
+  flowmon_thresh: '7.5,   5,    2,     0, -4*${flow_epsilon}'
+  flowmon_dur_s:  '  5, 180, 3600, 10800,                  0'
+  flowmon_warn_s: '60'
+  flowmon_warn_s_factor: '0.05'
+  flowmon_warn_thresh_factor: '0.9'
+  sample_rate_safety_factor: '0.95'
+
+  # Burst detection configuration
+  burstmon_any_thresh: '3'
+  burstmon_same_thresh: '2'
+
+packages:
+  espleak:
+    url: https://github.com/dnschneid/espleak
+    ref: main
+    file: espleak.yaml
+    refresh: 60s
+
+
+esphome:
+  name: "espleak"
+
+esp32:
+  board: esp32-poe-iso
+  framework:
+    type: arduino
+
+# Enable Home Assistant API
+api:
+  password: !secret api
+
+ota:
+  - platform: esphome
+    password: !secret ota
+
+wifi:
+  ssid: !secret ssid
+  password: !secret psk
+  ap:
+    ssid: "espleak Fallback Hotspot"
+    password: !secret hotspot
+
+captive_portal:
