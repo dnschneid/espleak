@@ -15,3 +15,8 @@ situation.
  * [PCA9515A I2C repeater module](https://www.amazon.com/dp/B0BG2BLKVJ) (2 total)
  * [QMC5883L modules](https://www.olimex.com/Products/Modules/Sensors/MOD-HMC5883L/) (2x)
  * Sensor waterproofing, e.g. [1" diameter 4:1 adhesive-lined heat shrink tubing](https://www.amazon.com/dp/B0B616X94M)
+
+## IO board
+
+![Schematic](ioboard.svg)
+
