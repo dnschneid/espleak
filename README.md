@@ -16,7 +16,9 @@ Features:
 
 ## How do I use this?
 
-See the [example](example) directory for inspiration on installation.
+See the [example](example) directory for inspiration on installation. Note that for performance, espleak *only* uses the
+Z axis of the magnetometers.  That means it's critical to have the QMC5883L installed flat against the meter (which is
+the easiest way to install it anyway).
 
 Once configured, the ESP32 operates autonomously. The on-board LED glows brighter for higher flows. If abnormal flow is
 detected, the LED will blink and the GPIO output will signal to a connected water controller (or valve actuator) to shut
