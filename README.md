@@ -77,10 +77,10 @@ the moment, this requires modified versions of the `i2c_bus` and `qmc5883l` comp
 ## Caveats?
 
 Due to the 200Hz maximum sample rate, espleak may not suffice for larger homes. The exact thresholds are dependent on
-what meter you have. For the Badger 20, for example, if you anticipate having >7.5 gallons/minute of normal water usage,
+what meter you have. For the Badger 25, for example, if you anticipate having >7.5 gallons/minute of normal water usage,
 some of the detection features are diminished. Extreme flow mitigation won't be nearly as reliable if you expect >15
 gallons/minute, and the system can't even correctly report flows above 30 gallons/minute, although it can still react to
-abnormal flows beyond that. For a Badger 20, 2~3 baths is a reasonable limit. Larger homes may have larger meters,
+abnormal flows beyond that. For a Badger 25, 2~3 baths is a reasonable limit. Larger homes may have larger meters,
 though, so you should do the math.
 
 You should understand how the system works and convince yourself that you have installed and configured all of the
