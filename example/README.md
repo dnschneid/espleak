@@ -39,6 +39,9 @@ waterproofing and placement rigidity. The assembly is zip-tied to the water mete
 
 The IO board is pretty simple and can be built up on a breadboard or other prototyping aid.
 
+When wiring up the 2.5mm TS cable, think about how to provide some strain relief in case it gets yanked during
+installation. The wires on audio cables tend to be very thin and fragile.
+
 ![Schematic](ioboard.svg)
 
 Note that if you are not using the PCA9515A, you should not have anything stronger than 2.2K total pull-up resistance on
