@@ -42,7 +42,7 @@ The IO board is pretty simple and can be built up on a breadboard or other proto
 When wiring up the 2.5mm TS cable, think about how to provide some strain relief in case it gets yanked during
 installation. The wires on audio cables tend to be very thin and fragile.
 
-![Schematic](ioboard.svg)
+![IO board schematic](img/ioboard.svg)
 
 Note that if you are not using the PCA9515A, you should not have anything stronger than 2.2K total pull-up resistance on
 the I2C lines. The QMC5883L by itself is only rated for 1mA of drive strength (whereas the PCA9515A can do 6mA). This
@@ -73,14 +73,14 @@ pins at an angle so that when squeezed together they form a strong triangle. The
 directly into the other side of the PCA9515A module. The module conveniently passes through VCC0, and there's no need to
 connect VCC1 to anything.
 
-(photo pending)
+![QMC5883L oriented with pins](img/sensor1.jpg) ![QMC5883L with PCA9515A ready to solder](img/sensor2.jpg)
 
 Alternatively, you can cut the SDA/SCL traces to the 10-pin header on the QMC5883L and wire between the connector pins
 and the PCA9515A module. Then you can cut a UEXT cable in half and splice the wires to the CAT6 cable. This is a little
 more fiddly but allows the module to be detached. While being able to replace the module may be nice, it's mechanically
 less robust than the direct connection and probably not worth the effort.
 
-(photo pending)
+![QMC5883L with traces cut, PCA9515A attached, and wires to pins](img/sensor3.jpg)
 
 ## Mounting the sensors
 
@@ -99,11 +99,11 @@ gotten them in approximately the right place, hold them there with some zipties.
 here; in this example we only needed two zip ties to hold everything firmly together. You can use pliers to pull the zip
 ties extra tight.
 
-(photo pending)
+![2x sensors mounted to the water meter body](img/mounted.jpg)
 
 ## Controller box
 
 The ESP32, IO board, Bulldog controller, and battery can all fit comfortably in the waterproof box. Note that EcoNet
 Controls provides the controller and battery already nicely mounted inside the box with the ODK-2 purchase option.
 
-(photo pending)
+![Controller box configuration](img/box.jpg)
