@@ -39,10 +39,12 @@ waterproofing and placement rigidity. The assembly is zip-tied to the water mete
 
 The IO board is pretty simple and can be built up on a breadboard or other prototyping aid.
 
+![IO board schematic](img/ioboard.svg)
+
 When wiring up the 2.5mm TS cable, think about how to provide some strain relief in case it gets yanked during
 installation. The wires on audio cables tend to be very thin and fragile.
 
-![IO board schematic](img/ioboard.svg)
+![Pretty janky IO board prototype](img/io.jpg)
 
 Note that if you are not using the PCA9515A, you should not have anything stronger than 2.2K total pull-up resistance on
 the I2C lines. The QMC5883L by itself is only rated for 1mA of drive strength (whereas the PCA9515A can do 6mA). This
@@ -70,8 +72,8 @@ backside of the QMC5883L module, so that it's not between the QMC5883L IC and th
 Conveniently, the QMC5883L module's thru-hole header matches the pinout of the PCA9515A module. You can put a row of 4x
 0.1" pins between the module and the PCA9515A as in the picture below. The two boards can be directly soldered to the
 pins at an angle so that when squeezed together they form a strong triangle. The CAT6 cable can then be soldered
-directly into the other side of the PCA9515A module. The module conveniently passes through VCC0, and there's no need to
-connect VCC1 to anything.
+directly into the other side of the PCA9515A module. The module conveniently passes through VCC0 and GND, and there's no
+need to connect VCC1 or EN to anything.
 
 ![QMC5883L oriented with pins](img/sensor1.jpg) ![QMC5883L with PCA9515A ready to solder](img/sensor2.jpg)
 
