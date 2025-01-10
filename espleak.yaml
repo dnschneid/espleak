@@ -438,7 +438,9 @@ sensor:
             }
           }
           if (update_text) {
-            id(leak_trigger).publish_state(str_sprintf("flowmon #%i (%g for %gs)", i, thresh[i], dur_s[i]).c_str());
+            id(leak_trigger).publish_state(str_sprintf(
+                "flowmon #%i (%g > %g for %gs)", i, flow, thresh[i], dur_s[i]
+                ).c_str());
           }
           logstate += str_sprintf("%g ", t[i]);
         }
