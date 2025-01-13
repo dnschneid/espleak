@@ -138,6 +138,15 @@ globals:
     initial_value: '1'
 
 
+api:
+  services:
+    - service: set_total
+      variables:
+        new_total: float
+      then:
+        - lambda: id(quarter_rotations_total) = new_total / ${volume_per_quarter_rotation};
+
+
 number:
   - platform: template
     id: simulate_flow

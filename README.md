@@ -38,6 +38,7 @@ In addition, there are several diagnostic entities:
  * The current sample rate of the sensors
  * A status indicator for sensor failure, which may require recalibration or physical attention to resolve
  * A button to trigger recalibration
+ * A service (`set_total`) which can be called to reset the total to a chosen value (e.g. to match your water meter)
 
 Finally, there are a few hidden entities that can be enabled as needed:
  * The on-board button status
