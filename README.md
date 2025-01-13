@@ -76,6 +76,25 @@ the moment, this requires modified versions of the `i2c_bus` and `qmc5883l` comp
 [dnschneid/esphome@i2creset](https://github.com/dnschneid/esphome/tree/i2creset) and pulled in by `espleak.yaml`.
 
 
+## How do I test it?
+
+Test the flow reporting by filling up a bucket in a fixture and timing how long it takes to fill up. The reported flow
+during the fill should equal the volume of the bucket divided by the time it took to fill.
+
+Test the flow-based leak response by enabling the flow simulator entity and increasing the flow until it is just below
+the threshold of one of your entries. Then, turn on a fixture to push the flow over the limit and confirm the system
+reacts after time has elapsed. You can shut off the fixture before time has elapsed to confirm that the timing resets.
+Hitting the "clear leak" button will automatically zero out the flow simulator.
+
+Testing the burst heuristics is more involved. The easiest way is to target a burst flow rate that can be quickly
+achieved by something you control -- be it a garden hose nozzle, a washing machine, or even an irrigation system. Then,
+increase the `sensor_update_interval_ms` setting until the flow rate is outside the measurable range of the sensors (see
+the `flow_max` calculation). Once you've installed the updated image, you should be able to trigger the burst heuristics
+by suddenly activating your flow source. You can try different update intervals to push the sensing into different
+regions of operation. Remember to revert the update interval when you're done testing, otherwise your next shower will
+be extremely short.
+
+
 ## Caveats?
 
 Due to the 200Hz maximum sample rate, espleak may not suffice for larger homes. The exact thresholds are dependent on
