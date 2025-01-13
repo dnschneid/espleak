@@ -39,10 +39,11 @@ substitutions:
   # flowmon: performs leak detection by monitoring flow rate over time
   # multiple monitors allow for faster response to higher flow rates
   # negative flow monitors react to an upstream leak, or aliasing from a high-flow pipe burst
-  # Leaks are tracked by a flow threshold and a allowed duration:
-  #   flowmon_thresh: maximum allowed flow in volume_units; beyond this, the timer will count down.
-  #                   can be negative. zero means any non-zero flow, positive *or* negative.
-  #   flowmon_dur_s: the number of seconds to allow a flow before triggering a leak. set to 0 to trigger instantly.
+  # Configure the monitors using pairs of flow threshold and allowed duration:
+  #   threshold: maximum allowed flow in volume_units; beyond this, the timer will count down.
+  #              can be negative. zero means any non-zero flow, positive *or* negative.
+  #   duration: the number of seconds to allow a flow before triggering a leak. set to 0 to trigger instantly.
+  # Set the flowmon_config variable with comma-separated pairs of threshold,duration. /* you can add C-style comments */
   # a leak warning will be issued in one of the following conditions:
   #   if the duration is at least flowmon_warn_s: less than flowmon_warn_s or flowmon_warn_s_factor of the time left
   #   if the duration is less than flowmon_warn_s: within flowmon_warn_thresh_factor of the flow threshold
@@ -60,10 +61,15 @@ substitutions:
   #   2) a single shower for more than an hour
   #   3) any flow for more than 3 hours
   #   4) a significant negative water flow for any amount of time
-  # As a safety check, if the length of flowmon_thresh and flowmon_dur_s aren't the same,
+  # As a safety check, if there are an odd number of values in the config,
   #   you will get a compile-time error: "size of array 't' is negative"
-  flowmon_thresh: '7.5,   5,    2,     0, -4*${flow_epsilon}'
-  flowmon_dur_s:  '  5, 180, 3600, 10800,                  0'
+  flowmon_config: '
+    7.5, 5,   /* 1.5x all showers */
+    5, 180,   /* beyond all showers for more than a toilet refill period */
+    2, 3600,  /* one shower for more than an hour */
+    0, 10800, /* any flow for more than 3 hours */
+    -4*${flow_epsilon}, 0,  /* a significant negative water flow */
+    '
   flowmon_warn_s: '60'
   flowmon_warn_s_factor: '0.05'
   flowmon_warn_thresh_factor: '0.9'
@@ -383,10 +389,9 @@ sensor:
       static const float warn_thresh_factor = ${flowmon_warn_thresh_factor};
       static const float warn_s_factor = ${flowmon_warn_s_factor};
       static const float warn_s = ${flowmon_warn_s};
-      static const float thresh[] = {${flowmon_thresh}};
-      static const float dur_s[] = {${flowmon_dur_s}};
-      static const int count = sizeof(thresh)/sizeof(thresh[0]);
-      static float t[count==sizeof(dur_s)/sizeof(dur_s[0])?count:-1] = {0};
+      static const float cfg[] = {${flowmon_config}};
+      static const int count = sizeof(cfg)/sizeof(cfg[0])/2;
+      static float t[sizeof(cfg)/sizeof(cfg[0])%2?-1:count] = {0};
       static int zero_flow_run = 0;
       static int reset_state = 0;
       static float max_sample_rate = 0;
@@ -400,8 +405,8 @@ sensor:
       if (reset_state == 0) {
         // Reset flowmon
         for (int i = 0; i < count; i++) {
-          t[i] = dur_s[i];
-          max_flow = max(max_flow, thresh[i]);
+          t[i] = cfg[i*2+1];
+          max_flow = max(max_flow, cfg[i*2]);
         }
         reset_state = 1;
         return NAN;
@@ -418,14 +423,16 @@ sensor:
         // Flowmon!
         std::string logstate;
         for (int i = 0; i < count; i++) {
+          float thresh = cfg[i*2];
+          float dur_s = cfg[i*2+1];
           bool update_text = false;
-          if (thresh[i] >= 0 && flow > thresh[i] ||
-              thresh[i] <= 0 && flow < thresh[i]) {
+          if (thresh >= 0 && flow > thresh ||
+              thresh <= 0 && flow < thresh) {
             // avoid the case where poor sample rates alias normal flows to look negative
-            if (thresh[i] >= 0 || rate >= max_sample_rate * sample_rate_safety_factor) {
+            if (thresh >= 0 || rate >= max_sample_rate * sample_rate_safety_factor) {
               t[i] -= ${flow_interval_s};
             }
-            if (t[i] <= max(warn_s, dur_s[i] * warn_s_factor)) {
+            if (t[i] <= max(warn_s, dur_s * warn_s_factor)) {
               id(leak_warning).publish_state(true);
               update_text = true;
             }
@@ -435,20 +442,20 @@ sensor:
             }
           } else {
             // warn based on flow threshold for short-trigger monitors
-            if (dur_s[i] < warn_s && (
-                 thresh[i] >= 0 && flow > thresh[i] * warn_thresh_factor ||
-                 thresh[i] <= 0 && flow < thresh[i] * warn_thresh_factor)) {
+            if (dur_s < warn_s && (
+                 thresh >= 0 && flow > thresh * warn_thresh_factor ||
+                 thresh <= 0 && flow < thresh * warn_thresh_factor)) {
               id(leak_warning).publish_state(true);
               update_text = true;
             }
             // only reset the monitor if the sample rate is normal
             if (rate >= max_sample_rate * sample_rate_safety_factor) {
-              t[i] = dur_s[i];
+              t[i] = dur_s;
             }
           }
           if (update_text) {
             id(leak_trigger).publish_state(str_sprintf(
-                "flowmon #%i (%g > %g for %gs)", i, flow, thresh[i], dur_s[i]
+                "flowmon #%i (%g > %g for %gs)", i, flow, thresh, dur_s
                 ).c_str());
           }
           logstate += str_sprintf("%g ", t[i]);

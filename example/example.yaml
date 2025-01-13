@@ -36,8 +36,13 @@ substitutions:
   flow_max: '${volume_per_quarter_rotation}*120000/${sensor_update_interval_ms}'
 
   # Leak detection configuration
-  flowmon_thresh: '7.5,   5,    2,     0, -4*${flow_epsilon}'
-  flowmon_dur_s:  '  5, 180, 3600, 10800,                  0'
+  flowmon_config: '
+    7.5, 5,   /* 1.5x all showers */
+    5, 180,   /* beyond all showers for more than a toilet refill period */
+    2, 3600,  /* one shower for more than an hour */
+    0, 10800, /* any flow for more than 3 hours */
+    -4*${flow_epsilon}, 0,  /* a significant negative water flow */
+    '
   flowmon_warn_s: '60'
   flowmon_warn_s_factor: '0.05'
   flowmon_warn_thresh_factor: '0.9'
