@@ -142,6 +142,10 @@ globals:
     type: float
     restore_value: no
     initial_value: '1'
+  - id: disarm_s
+    type: float
+    restore_value: no
+    initial_value: '0'
 
 
 api:
@@ -151,6 +155,13 @@ api:
         new_total: float
       then:
         - lambda: id(quarter_rotations_total) = new_total / ${volume_per_quarter_rotation};
+    - service: disarm
+      variables:
+        duration_s: float
+      then:
+        - lambda: |-
+            id(disarm_s) = duration_s;
+            id(leak_trigger).publish_state(duration_s > 0 ? "disarmed" : "armed");
 
 
 number:
@@ -419,10 +430,18 @@ sensor:
       }
       max_sample_rate = max(max_sample_rate, rate);
       id(sensor_sample_rate).publish_state(rate);
+      // Disarm
+      bool armed = id(disarm_s) <= 0;
+      if (!armed) {
+        id(disarm_s) -= ${flow_interval_s};
+        if (id(disarm_s) <= 0) {
+          id(leak_trigger).publish_state("armed");
+        }
+      }
       if (rate) {
         // Flowmon!
-        std::string logstate;
-        for (int i = 0; i < count; i++) {
+        std::string logstate = armed ? "" : "disarmed";
+        for (int i = 0; i < count && armed; i++) {
           float thresh = cfg[i*2];
           float dur_s = cfg[i*2+1];
           bool update_text = false;
@@ -545,9 +564,11 @@ script:
             id(quarter_rotations_flow) += mod;
           }
           // burstmon
+          bool armed = id(disarm_s) <= 0;
           int sample_time = millis();
           if (mod && sample_time - last_sample[sensor] < 2*${sensor_update_interval_ms}
-                  && id(sensor_sample_rate).state > sample_rate_thresh) {
+                  && id(sensor_sample_rate).state > sample_rate_thresh
+                  && armed) {
             run[sensor]++;
             run[2]++;
             bool any_burst = ${burstmon_any_thresh} && run[2] > ${burstmon_any_thresh};
