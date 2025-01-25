@@ -403,6 +403,7 @@ sensor:
       static const float cfg[] = {${flowmon_config}};
       static const int count = sizeof(cfg)/sizeof(cfg[0])/2;
       static float t[sizeof(cfg)/sizeof(cfg[0])%2?-1:count] = {0};
+      static float warn_clear_s = 0;
       static int zero_flow_run = 0;
       static int reset_state = 0;
       static float max_sample_rate = 0;
@@ -453,6 +454,7 @@ sensor:
             }
             if (t[i] <= max(warn_s, dur_s * warn_s_factor)) {
               id(leak_warning).publish_state(true);
+              warn_clear_s = max(warn_clear_s, dur_s);
               update_text = true;
             }
             if (t[i] <= 0.0f) {
@@ -464,6 +466,7 @@ sensor:
             if (dur_s < warn_s && (
                  thresh >= 0 && flow > thresh * warn_thresh_factor ||
                  thresh <= 0 && flow < thresh * warn_thresh_factor)) {
+              warn_clear_s = max(warn_clear_s, warn_s);
               id(leak_warning).publish_state(true);
               update_text = true;
             }
@@ -488,6 +491,14 @@ sensor:
           zero_flow_run = 0;
           id(sensor_failure).publish_state(true);
           ESP_LOGW("sensors", "no flow for 24 hours; did the sensors fall off?");
+        }
+
+        // Warning auto-clear
+        if (warn_clear_s > 0) {
+          warn_clear_s -= ${flow_interval_s};
+          if (warn_clear_s <= 0 && !id(leak_detected).state) {
+            id(leak_warning).publish_state(false);
+          }
         }
       }
       // Diagnostic: update LED state
