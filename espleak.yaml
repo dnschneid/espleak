@@ -363,7 +363,7 @@ sensor:
     accuracy_decimals: 0
     device_class: frequency
     state_class: measurement
-    unit_of_measurement: hz
+    unit_of_measurement: Hz
     filters:
       - or:
         - throttle: 60s
