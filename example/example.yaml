@@ -32,8 +32,8 @@ substitutions:
   volume_unit: 'gal'
 
   # Functional/informative; DO NOT EDIT
-  flow_epsilon: '${volume_per_quarter_rotation}*60/${flow_interval_s}'
-  flow_max: '${volume_per_quarter_rotation}*120000/${sensor_update_interval_ms}'
+  flow_epsilon: '${volume_per_quarter_rotation}*60/(${flow_interval_s})'
+  flow_max: '${volume_per_quarter_rotation}*120000/(${sensor_update_interval_ms})'
 
   # Leak detection configuration
   flowmon_config: '

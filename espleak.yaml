@@ -33,8 +33,8 @@ substitutions:
   volume_unit: 'gal'  # Volume units
 
   # Functional/informative; DO NOT EDIT
-  flow_epsilon: '${volume_per_quarter_rotation}*60/${flow_interval_s}'  # The minimum reportable flow rate
-  flow_max: '${volume_per_quarter_rotation}*120000/${sensor_update_interval_ms}'  # The maximum reportable flow rate
+  flow_epsilon: '${volume_per_quarter_rotation}*60/(${flow_interval_s})'  # The minimum reportable flow rate
+  flow_max: '${volume_per_quarter_rotation}*120000/(${sensor_update_interval_ms})'  # The maximum reportable flow rate
 
   # flowmon: performs leak detection by monitoring flow rate over time
   # multiple monitors allow for faster response to higher flow rates
@@ -154,7 +154,7 @@ api:
       variables:
         new_total: float
       then:
-        - lambda: id(quarter_rotations_total) = new_total / ${volume_per_quarter_rotation};
+        - lambda: id(quarter_rotations_total) = new_total / (${volume_per_quarter_rotation});
     - service: disarm
       variables:
         duration_s: float
@@ -411,7 +411,7 @@ sensor:
       float flow = (id(quarter_rotations_flow) + id(simulate_flow).state) * ${flow_epsilon};
       id(quarter_rotations_flow) = 0;
       // Update sample rate
-      float rate = min(id(samples)[0], id(samples)[1]) / ${flow_interval_s};
+      float rate = min(id(samples)[0], id(samples)[1]) / (${flow_interval_s});
       id(samples)[0] = 0;
       id(samples)[1] = 0;
       if (reset_state == 0) {
@@ -487,7 +487,7 @@ sensor:
         // Monitor for detached sensors
         if (flow) {
           zero_flow_run = 0;
-        } else if (zero_flow_run++ > 86400/${flow_interval_s}) {
+        } else if (zero_flow_run++ > 86400/(${flow_interval_s})) {
           zero_flow_run = 0;
           id(sensor_failure).publish_state(true);
           ESP_LOGW("sensors", "no flow for 24 hours; did the sensors fall off?");
@@ -527,7 +527,7 @@ script:
           static int hyst_sampling = 0;
           static int calib_rots = 0;
           static int last_sample[2] = {0, 0};
-          static const float sample_rate_thresh = 1000/${sensor_update_interval_ms}*${sample_rate_safety_factor};
+          static const float sample_rate_thresh = 1000/(${sensor_update_interval_ms})*${sample_rate_safety_factor};
           float& smin = id(qcal)[2*sensor];
           float& smax = id(qcal)[2*sensor+1];
           float& hysteresis = id(qcal)[4];
