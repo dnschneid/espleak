@@ -534,7 +534,7 @@ script:
           id(samples)[sensor] += 1;
           if (!smin && !smax) {
             smin = smax = value;
-            hyst_sampling = 1000;
+            hyst_sampling = 2000;
             calib_rots = 1000;
           } else if (calib_rots) {
             smin = min(smin, value);
@@ -544,7 +544,7 @@ script:
             hyst_sampling--;
             if (smax - smin > hysteresis) {
               hysteresis = smax - smin;
-              hyst_sampling = 1000;
+              hyst_sampling = 2000;
               if (hysteresis > 20) {
                 hysteresis = 20;
                 hyst_sampling = 0;
